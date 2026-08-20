@@ -1,220 +1,218 @@
 import streamlit as st
-import yfinance as yf
+import requests
+import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
-# 1. 페이지 기본 설정 및 디자인
+# 1. 페이지 설정 및 따뜻한 디자인 적용
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="따뜻한 주식 비교 탐색기",
-    page_icon="📈",
+    page_title="따뜻한 대한민국 기온 탐색기",
+    page_icon="☀️",
     layout="wide"
 )
 
-# 따뜻하고 친근한 분위기를 위한 테마 스타일 커스텀 CSS
+# 따뜻하고 오가닉한 느낌의 CSS 스타일링
 st.markdown("""
     <style>
-    /* 전체 배경색 느낌 부여 */
+    /* 전체 메인 배경색 */
     .main {
         background-color: #faf6f0;
     }
-    /* 카드 지표 배경 스타일 */
+    /* 카드 지표(Metric) 스타일링 */
     div[data-testid="stMetric"] {
         background-color: #ffffff;
         border-radius: 12px;
-        padding: 15px 20px;
-        box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.05);
+        padding: 16px 20px;
+        box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.04);
         border: 1px solid #f0e6d2;
     }
-    /* 라디오 버튼(기간 선택) 수평 정렬 간격 조정 */
-    div[data-testid="stRadio"] > div {
-        flex-direction: row;
-        gap: 20px;
+    /* 안내 상자 커스텀 스타일 */
+    .guide-box {
+        background-color: #f7efe2;
+        border-left: 5px solid #e76f51;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
     }
     </style>
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. 메인 타이틀 및 서비스 소개
+# 2. 이용방법 안내 섹션 (초보자용 가이드)
 # -----------------------------------------------------------------------------
-st.title("📈 한눈에 보는 주식 비교 동향")
-st.caption("관심 있는 종목 2개를 나란히 비교하고, 원하는 기간별 주가 추이와 주요 지표를 확인해보세요 🌿")
-st.markdown("---")
+st.title("☀️ 우리 동네 1년 기온 변화 탐색기")
+st.caption("가입 없이 이용 가능한 Open-Meteo 무료 API를 활용하여 대한민국 주요 도시의 기온 데이터를 시각화합니다.")
+
+st.markdown("""
+<div class="guide-box">
+    <b>💡 초보자를 위한 이용 안내</b><br>
+    1. <b>지역 선택</b>: 아래 드롭다운 메뉴에서 기온 흐름을 확인하고 싶은 도시를 선택해주세요.<br>
+    2. <b>오늘의 기온 지표</b>: 상단 카드에서 선택한 지역의 오늘 최고/최저 기온과 평균 기온을 한눈에 볼 수 있습니다.<br>
+    3. <b>월별 기온 추이 그래프</b>: 지난 1년간의 월별 평균 최고/최저 기온 변화를 꺾은선 그래프로 확인하세요. (그래프 위로 마우스를 올리면 상세 온도가 표시됩니다!)
+</div>
+""", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. 사용자 입력 (종목 코드 2개 및 기간 선택 버튼)
+# 3. 주요 도시 위도/경도 데이터 정의
 # -----------------------------------------------------------------------------
-st.subheader("🔍 검색 설정")
-col_input1, col_input2 = st.columns(2)
+CITIES = {
+    "서울특별시": {"lat": 37.5665, "lon": 126.9780},
+    "부산광역시": {"lat": 35.1796, "lon": 129.0756},
+    "대구광역시": {"lat": 35.8714, "lon": 128.6014},
+    "인천광역시": {"lat": 37.4563, "lon": 126.7052},
+    "광주광역시": {"lat": 35.1595, "lon": 126.8526},
+    "대전광역시": {"lat": 36.3510, "lon": 127.3850},
+    "울산광역시": {"lat": 35.5384, "lon": 129.3114},
+    "제주특별자치도": {"lat": 33.4996, "lon": 126.5312},
+    "강원도 (춘천)": {"lat": 37.8813, "lon": 127.7298}
+}
 
-with col_input1:
-    ticker_input1 = st.text_input(
-        label="첫 번째 종목 코드",
-        value="005930.KS",
-        placeholder="예: 005930.KS (삼성전자)",
-        help="한국 주식은 코드 뒤에 '.KS'(코스피) 또는 '.KQ'(코스닥)를 붙여주세요."
-    )
-
-with col_input2:
-    ticker_input2 = st.text_input(
-        label="두 번째 종목 코드 (선택)",
-        value="000660.KS",
-        placeholder="예: 000660.KS (SK하이닉스), AAPL (애플)",
-        help="비교를 원치 않으시면 비워두셔도 됩니다."
-    )
-
-# 기간 선택 (라디오 버튼 형태)
-period_option = st.radio(
-    label="📅 조회 기간 선택",
-    options=["1개월", "6개월", "1년", "5년"],
-    index=2, # 기본값: 1년
-    horizontal=True
+# -----------------------------------------------------------------------------
+# 4. 사용자 입력 (지역 선택)
+# -----------------------------------------------------------------------------
+selected_city = st.selectbox(
+    "📍 조회할 지역을 선택해주세요",
+    options=list(CITIES.keys()),
+    index=0
 )
 
-# 선택한 기간에 따라 날짜 일수 계산
-period_days_map = {
-    "1개월": 30,
-    "6개월": 180,
-    "1년": 365,
-    "5년": 1825
-}
-selected_days = period_days_map[period_option]
-
-end_date = datetime.today()
-start_date = end_date - timedelta(days=selected_days)
-
 # -----------------------------------------------------------------------------
-# 4. 데이터 불러오기 함수
+# 5. Open-Meteo API 연동 및 데이터 불러오기 함수
 # -----------------------------------------------------------------------------
-def fetch_stock_data(symbol_text):
-    """yfinance를 이용해 주가 데이터를 안전하게 불러오는 함수"""
-    if not symbol_text.strip():
-        return None, None, ""
+@st.cache_data(ttl=3600)  # 1시간 동안 API 호출 결과 캐싱하여 빠른 실행 지원
+def load_weather_data(lat, lon):
+    """Open-Meteo Historical Weather API를 호출해 지난 1년간의 일별 최고/최저 기온을 받아오는 함수"""
+    today = datetime.today().date()
+    start_date = today - timedelta(days=365)
     
-    symbol = symbol_text.strip().upper()
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(start=start_date, end=end_date)
-        if df.empty:
-            return None, symbol, ""
-        
-        info = ticker.info
-        currency = info.get('currency', '')
-        currency_symbol = "₩" if currency == "KRW" else ("$" if currency == "USD" else currency)
-        return df, symbol, currency_symbol
-    except Exception as e:
-        return None, symbol, ""
+    # Open-Meteo Historical Weather API URL 구축
+    url = (
+        f"https://archive-api.open-meteo.com/v1/archive?"
+        f"latitude={lat}&longitude={lon}&"
+        f"start_date={start_date}&end_date={today}&"
+        f"daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean&"
+        f"timezone=Asia%2FTokyo"
+    )
+    
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        daily_data = data.get("daily", {})
+        df = pd.DataFrame({
+            "date": pd.to_datetime(daily_data.get("time", [])),
+            "temp_max": daily_data.get("temperature_2m_max", []),
+            "temp_min": daily_data.get("temperature_2m_min", []),
+            "temp_mean": daily_data.get("temperature_2m_mean", [])
+        })
+        return df
+    else:
+        return None
 
 # -----------------------------------------------------------------------------
-# 5. 데이터 처리 및 화면 출력
+# 6. 데이터 연동 및 화면 출력
 # -----------------------------------------------------------------------------
-if ticker_input1:
-    with st.spinner("주가 데이터를 불러오는 중입니다..."):
-        df1, symbol1, curr1 = fetch_stock_data(ticker_input1)
-        df2, symbol2, curr2 = fetch_stock_data(ticker_input2) if ticker_input2 else (None, None, "")
+lat = CITIES[selected_city]["lat"]
+lon = CITIES[selected_city]["lon"]
 
-    if df1 is not None and not df1.empty:
-        # --- [1] 상단 지표 카드 (현재가 & 등락률) ---
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.subheader("💡 현재가 및 등락률")
-        
-        metric_col1, metric_col2 = st.columns(2)
-        
-        # 종목 1 현황
-        with metric_col1:
-            st.markdown(f"**📌 {symbol1}**")
-            c1, c2 = st.columns(2)
-            curr_p1 = df1['Close'].iloc[-1]
-            first_p1 = df1['Close'].iloc[0]
-            change_p1 = curr_p1 - first_p1
-            rate1 = (change_p1 / first_p1) * 100
-            
-            with c1:
-                st.metric("현재가", f"{curr1} {curr_p1:,.2f}" if curr1 != "₩" else f"{curr1} {int(curr_p1):,}")
-            with c2:
-                st.metric(f"{period_option} 등락률", f"{rate1:+.2f}%", delta=f"{change_p1:+.2f} {curr1}")
+with st.spinner(f"'{selected_city}'의 지난 1년 날씨 데이터를 가져오는 중입니다... 🌿"):
+    df_weather = load_weather_data(lat, lon)
 
-        # 종목 2 현황 (입력 및 데이터가 존재하는 경우)
-        if df2 is not None and not df2.empty:
-            with metric_col2:
-                st.markdown(f"**📌 {symbol2}**")
-                c1, c2 = st.columns(2)
-                curr_p2 = df2['Close'].iloc[-1]
-                first_p2 = df2['Close'].iloc[0]
-                change_p2 = curr_p2 - first_p2
-                rate2 = (change_p2 / first_p2) * 100
-                
-                with c1:
-                    st.metric("현재가", f"{curr2} {curr_p2:,.2f}" if curr2 != "₩" else f"{curr2} {int(curr_p2):,}")
-                with c2:
-                    st.metric(f"{period_option} 등락률", f"{rate2:+.2f}%", delta=f"{change_p2:+.2f} {curr2}")
-
-        # --- [2] Plotly 주가 비교 그래프 ---
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.subheader(f"📊 {period_option} 주가 추이 비교")
-
-        fig = go.Figure()
-
-        # 첫 번째 종목 라인 추가 (코랄/주황)
-        fig.add_trace(go.Scatter(
-            x=df1.index,
-            y=df1['Close'],
-            mode='lines',
-            name=symbol1,
-            line=dict(color='#E76F51', width=2.5),
-            hovertemplate=f'<b>{symbol1}</b><br>날짜: %{{x|%Y-%m-%d}}<br>종가: %{{y:,.2f}} {curr1}<extra></extra>'
-        ))
-
-        # 두 번째 종목 라인 추가 (청록)
-        if df2 is not None and not df2.empty:
-            fig.add_trace(go.Scatter(
-                x=df2.index,
-                y=df2['Close'],
-                mode='lines',
-                name=symbol2,
-                line=dict(color='#2A9D8F', width=2.5),
-                hovertemplate=f'<b>{symbol2}</b><br>날짜: %{{x|%Y-%m-%d}}<br>종가: %{{y:,.2f}} {curr2}<extra></extra>'
-            ))
-
-        fig.update_layout(
-            title=dict(text=f"<b>선택 기간 ({period_option}) 주가 흐름</b>", font=dict(size=18, color="#264653")),
-            xaxis=dict(title="날짜", showgrid=True, gridcolor='#f0e6d2'),
-            yaxis=dict(title="주가", showgrid=True, gridcolor='#f0e6d2'),
-            plot_bgcolor='#ffffff',
-            paper_bgcolor='#ffffff',
-            hovermode="x unified",
-            margin=dict(l=40, r=40, t=50, b=40)
+if df_weather is not None and not df_weather.empty:
+    # 가장 최근 날짜(오늘/어제) 데이터 추출
+    latest_row = df_weather.iloc[-1]
+    latest_date_str = latest_row["date"].strftime("%Y년 %m월 %d일")
+    
+    # --- [상단] 오늘(최근) 기온 지표 카드 ---
+    st.markdown(f"### 🌡️ 최근 기온 현황 <small style='font-size: 14px; color: #888;'>({latest_date_str} 기준)</small>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(
+            label="최고 기온",
+            value=f"{latest_row['temp_max']:.1f} °C"
+        )
+    with col2:
+        st.metric(
+            label="최저 기온",
+            value=f"{latest_row['temp_min']:.1f} °C"
+        )
+    with col3:
+        st.metric(
+            label="일평균 기온",
+            value=f"{latest_row['temp_mean']:.1f} °C"
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+    st.markdown("<br>", unsafe_allow_html=True)
 
-        # --- [3] 그래프 하단 상세 통계 카드 (최고가 · 최저가 · 평균가) ---
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.subheader(f"📋 {period_option} 상세 요약 통계")
+    # --- [하단] 지난 1년 월별 기온 추이 Plotly 꺾은선 그래프 ---
+    st.markdown("### 📊 최근 1년 월별 기온 추이")
+    
+    # 월별 그룹화 (년-월 기준으로 평균 계산)
+    df_weather["year_month"] = df_weather["date"].dt.to_period("M").astype(str)
+    monthly_df = df_weather.groupby("year_month")[["temp_max", "temp_min", "temp_mean"]].mean().reset_index()
 
-        stat_col1, stat_col2 = st.columns(2)
+    # Plotly 그래프 생성
+    fig = go.Figure()
 
-        # 종목 1 통화 포맷팅 지원 상세 카드
-        with stat_col1:
-            st.markdown(f"##### 🔹 {symbol1} 통계")
-            s1_c1, s1_c2, s1_c3 = st.columns(3)
-            high1, low1, avg1 = df1['High'].max(), df1['Low'].min(), df1['Close'].mean()
-            
-            s1_c1.metric("최고가", f"{curr1} {high1:,.2f}" if curr1 != "₩" else f"{curr1} {int(high1):,}")
-            s1_c2.metric("최저가", f"{curr1} {low1:,.2f}" if curr1 != "₩" else f"{curr1} {int(low1):,}")
-            s1_c3.metric("평균가", f"{curr1} {avg1:,.2f}" if curr1 != "₩" else f"{curr1} {int(avg1):,}")
+    # 월별 평균 최고 기온 선 (따뜻한 주황색)
+    fig.add_trace(go.Scatter(
+        x=monthly_df["year_month"],
+        y=monthly_df["temp_max"],
+        mode="lines+markers",
+        name="월평균 최고기온",
+        line=dict(color="#E76F51", width=3),
+        marker=dict(size=8),
+        hovertemplate="<b>%{x}</b><br>평균 최고기온: %{y:.1f} °C<extra></extra>"
+    ))
 
-        # 종목 2 상세 카드
-        if df2 is not None and not df2.empty:
-            with stat_col2:
-                st.markdown(f"##### 🔸 {symbol2} 통계")
-                s2_c1, s2_c2, s2_c3 = st.columns(3)
-                high2, low2, avg2 = df2['High'].max(), df2['Low'].min(), df2['Close'].mean()
-                
-                s2_c1.metric("최고가", f"{curr2} {high2:,.2f}" if curr2 != "₩" else f"{curr2} {int(high2):,}")
-                s2_c2.metric("최저가", f"{curr2} {low2:,.2f}" if curr2 != "₩" else f"{curr2} {int(low2):,}")
-                s2_c3.metric("평균가", f"{curr2} {avg2:,.2f}" if curr2 != "₩" else f"{curr2} {int(avg2):,}")
+    # 월별 평균 기온 선 (녹색/티일)
+    fig.add_trace(go.Scatter(
+        x=monthly_df["year_month"],
+        y=monthly_df["temp_mean"],
+        mode="lines+markers",
+        name="월평균 기온",
+        line=dict(color="#2A9D8F", width=2.5, dash="dash"),
+        marker=dict(size=6),
+        hovertemplate="<b>%{x}</b><br>월평균 기온: %{y:.1f} °C<extra></extra>"
+    ))
 
-    else:
-        st.warning("⚠️ 입력하신 첫 번째 종목 코드의 데이터를 찾을 수 없습니다. 코드를 확인해주세요.")
+    # 월별 평균 최저 기온 선 (시원한 푸른색)
+    fig.add_trace(go.Scatter(
+        x=monthly_df["year_month"],
+        y=monthly_df["temp_min"],
+        mode="lines+markers",
+        name="월평균 최저기온",
+        line=dict(color="#457B9D", width=3),
+        marker=dict(size=8),
+        hovertemplate="<b>%{x}</b><br>평균 최저기온: %{y:.1f} °C<extra></extra>"
+    ))
+
+    # 레이아웃 스타일 설정
+    fig.update_layout(
+        title=dict(
+            text=f"<b>[{selected_city}] 지난 1년간 월별 기온 변화</b>",
+            font=dict(size=18, color="#264653")
+        ),
+        xaxis=dict(
+            title="연월 (Year-Month)",
+            showgrid=True,
+            gridcolor="#f0e6d2"
+        ),
+        yaxis=dict(
+            title="기온 (°C)",
+            showgrid=True,
+            gridcolor="#f0e6d2"
+        ),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=40, r=40, t=60, b=40)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+else:
+    st.error("⚠️ 날씨 데이터를 가져오는 중에 문제가 발생했습니다. 잠시 후 다시 시도해주세요!")
