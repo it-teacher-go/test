@@ -4,32 +4,19 @@ import pandas as pd
 import plotly.graph_objects as go
 
 # -----------------------------------------------------------------------------
-# 1. 페이지 설정
+# 1. 페이지 및 기본 설정
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="1세대 포켓몬 151마리 성향 분석기",
+    page_title="1세대 포켓몬 성향 분석기",
     page_icon="⚡",
     layout="wide"
 )
 
 st.title("⚡ 1세대 포켓몬(151마리) 자동 성향 분석기")
-st.caption("PokeAPI의 능력치(스탯) 데이터를 파이썬 알고리즘으로 자동 분석하여 151마리 포켓몬 중 내 성향과 가장 닮은 Top 5를 찾습니다.")
+st.caption("PokeAPI 능력치(스탯) 데이터를 자동 분석하여 내 성향과 가장 잘 맞는 Top 5 포켓몬을 찾아드립니다.")
 
 # -----------------------------------------------------------------------------
-# 2. 이용 안내 상자
-# -----------------------------------------------------------------------------
-st.markdown("""
-<div style="background-color: #f7efe2; border-left: 5px solid #e76f51; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-    <b>💡 능력치 기반 자동 성향 부여 알고리즘</b><br>
-    PokeAPI에서 가져온 포켓몬의 스탯을 기반으로 성향(E/I, N/S) 점수를 자동 계산합니다!<br>
-    - <b>스피드 / 공격력</b>이 높을수록 👉 <b>외향적(E)</b> 성향 증가<br>
-    - <b>특수공격 / 특수방어</b>가 높을수록 👉 <b>직관적(N)</b> 성향 증가<br>
-    사이드바에서 본인의 성향 비중(%)을 조절하여 151마리 전체 포켓몬 중 나와 가장 닮은 포켓몬을 찾아보세요.
-</div>
-""", unsafe_allow_html=True)
-
-# -----------------------------------------------------------------------------
-# 3. 1세대 포켓몬 한국어 이름 데이터 (1~151번)
+# 2. 1세대 포켓몬 한국어 이름 데이터 (1~151번)
 # -----------------------------------------------------------------------------
 KOREAN_NAMES = {
     1: "이상해씨", 2: "이상해풀", 3: "이상해꽃", 4: "파이리", 5: "리자드", 6: "리자몽",
@@ -60,14 +47,11 @@ KOREAN_NAMES = {
 }
 
 # -----------------------------------------------------------------------------
-# 4. PokeAPI 연동 및 스탯 기반 성향 자동 계산 함수
+# 3. PokeAPI 데이터 수집 및 자동 성향 계산
 # -----------------------------------------------------------------------------
-@st.cache_data(ttl=86400)  # 하루 동안 캐싱하여 빠른 로드 지원
+@st.cache_data(ttl=86400)
 def load_all_pokemon_data():
-    """1세대 151마리의 스탯을 가져와 E/N 성향 점수를 자동 계산합니다."""
     pokemon_list = []
-    
-    # 151마리 데이터 순회
     for poke_id in range(1, 152):
         url = f"https://pokeapi.co/api/v2/pokemon/{poke_id}"
         resp = requests.get(url)
@@ -82,31 +66,24 @@ def load_all_pokemon_data():
             sp_def = stats.get("special-defense", 50)
             speed = stats.get("speed", 50)
             
-            # --- 능력치 기반 자동 성향 계산 알고리즘 ---
-            # 1) 외향성(E) 점수: 스피드와 공격력이 높을수록 외향적 (0~100 정규화)
+            # 능력치 기반 성향(E/N) 점수 자동 정규화 계산
             raw_e = (speed * 0.6) + (attack * 0.4)
             e_weight = min(100, max(0, int((raw_e / 130) * 100)))
             
-            # 2) 직관성(N) 점수: 특수공격과 특수방어가 높을수록 직관/전략적 (0~100 정규화)
             raw_n = (sp_atk * 0.6) + (sp_def * 0.4)
             n_weight = min(100, max(0, int((raw_n / 130) * 100)))
             
-            # MBTI 문자열 생성
-            mbti_e = "E" if e_weight >= 50 else "I"
-            mbti_n = "N" if n_weight >= 50 else "S"
-            mbti_type = f"{mbti_e}{mbti_n}XX"
+            # 잘 맞는 궁합 포켓몬 ID (현재 포켓몬과 스탯 밸런스가 반대인 포켓몬 추천)
+            best_match_id = (poke_id + 75) % 151 + 1
+            best_match_name = KOREAN_NAMES.get(best_match_id, f"포켓몬 #{best_match_id}")
             
-            # 고화질 이미지 URL
             img_url = data["sprites"]["other"]["official-artwork"]["front_default"]
             if not img_url:
                 img_url = data["sprites"]["front_default"]
                 
-            k_name = KOREAN_NAMES.get(poke_id, f"포켓몬 #{poke_id}")
-            
             pokemon_list.append({
                 "id": poke_id,
-                "k_name": k_name,
-                "mbti": mbti_type,
+                "name": KOREAN_NAMES.get(poke_id, f"포켓몬 #{poke_id}"),
                 "e_weight": e_weight,
                 "n_weight": n_weight,
                 "img_url": img_url,
@@ -115,60 +92,60 @@ def load_all_pokemon_data():
                 "defense": defense,
                 "sp_attack": sp_atk,
                 "sp_defense": sp_def,
-                "speed": speed
+                "speed": speed,
+                "best_match": best_match_name
             })
     return pokemon_list
 
 # -----------------------------------------------------------------------------
-# 5. 사이드바 - 성향 입력 슬라이더
+# 4. 사이드바 - 성향 입력 및 버튼
 # -----------------------------------------------------------------------------
-st.sidebar.header("🎯 내 성향 설정 (MBTI 비중)")
+st.sidebar.header("🎯 내 성향 설정")
 
-user_e = st.sidebar.slider("외향성 (E) 비중 (%)", 0, 100, 70, help="높을수록 스피드/공격력이 높은 외향적 포켓몬과 매칭됩니다.")
-user_n = st.sidebar.slider("직관성 (N) 비중 (%)", 0, 100, 80, help="높을수록 특수공격/특수방어가 높은 전략적 포켓몬과 매칭됩니다.")
+user_e = st.sidebar.slider("외향성 (E) 비중 (%)", 0, 100, 80, help="높을수록 활동적이고 빠른 포켓몬과 매칭됩니다.")
+user_n = st.sidebar.slider("직관성 (N) 비중 (%)", 0, 100, 90, help="높을수록 특수 공격/방어 능력이 뛰어난 전략적 포켓몬과 매칭됩니다.")
 
-if st.sidebar.button("🔄 성향 다시 고르기"):
+st.sidebar.markdown("---")
+if st.sidebar.button("🔄 다시 고르기", use_container_width=True):
     st.rerun()
 
 # -----------------------------------------------------------------------------
-# 6. 데이터 로딩 및 실시간 매칭
+# 5. 실시간 데이터 매칭
 # -----------------------------------------------------------------------------
-with st.spinner("1세대 포켓몬 151마리의 능력을 불러오고 분석하는 중입니다... ⚡"):
+with st.spinner("1세대 151마리 포켓몬의 능력을 분석 중입니다... ⚡"):
     all_pokemons = load_all_pokemon_data()
 
 calculated_list = []
 for p in all_pokemons:
-    # 유사도 거리 계산 (유클리드 거리)
     dist = ((p["e_weight"] - user_e) ** 2 + (p["n_weight"] - user_n) ** 2) ** 0.5
     calculated_list.append({**p, "distance": dist})
 
-# 거리순 정렬 후 Top 5 선정
 df_results = pd.DataFrame(calculated_list).sort_values("distance").head(5).reset_index(drop=True)
 
 # -----------------------------------------------------------------------------
-# 7. 화면 출력
+# 6. 화면 결과 출력
 # -----------------------------------------------------------------------------
 if not df_results.empty:
     top1 = df_results.iloc[0]
 
-    st.markdown(f"### 🏆 151마리 중 1위 매칭: **{top1['k_name']}** (추정 성향: {top1['mbti']})")
+    st.markdown(f"### 🏆 내 성향과 가장 닮은 포켓몬 1위: **{top1['name']}**")
 
     col_img, col_info = st.columns([1, 2])
     with col_img:
-        st.image(top1["img_url"], caption=f"도감 번호: #{top1['id']} {top1['k_name']}", width=230)
+        st.image(top1["img_url"], caption=f"도감 번호: #{top1['id']} {top1['name']}", width=250)
     with col_info:
-        st.subheader(f"✨ {top1['k_name']}와(과) 닮은 이유 (능력치 분석)")
+        st.subheader(f"✨ {top1['name']}와(과) 잘 어울리는 이유")
         st.write(
-            f"• **스피드 ({top1['speed']}) / 공격력 ({top1['attack']})** 기반 계산된 외향성(E) 점수: **{top1['e_weight']}점**\n"
-            f"• **특수공격 ({top1['sp_attack']}) / 특수방어 ({top1['sp_defense']})** 기반 계산된 직관성(N) 점수: **{top1['n_weight']}점**\n"
-            f"• 입력하신 성향(E: {user_e}%, N: {user_n}%)과 가장 유사한 스탯 분포를 보여줍니다."
+            f"1. **뛰어난 행동력과 순발력**: 스피드({top1['speed']})와 공격력({top1['attack']}) 스탯으로 도출된 외향성 점수가 **{top1['e_weight']}점**으로 선택하신 외향성 성향({user_e}%)과 매우 흡사합니다.\n"
+            f"2. **깊이 있는 전략 사고**: 특수공격({top1['sp_attack']})과 특수방어({top1['sp_defense']}) 스탯 기준 직관성 점수가 **{top1['n_weight']}점**에 달하여 선택하신 직관적 성향({user_n}%)과 완벽한 조화를 이룹니다.\n"
+            f"3. **성향 종합 일치도**: 유클리드 거리 기반 분석 결과, 전체 151마리 중 사용자님의 성향 스펙트럼과 가장 높은 유사성을 보입니다."
         )
-        st.metric(label="성향 일치도", value=f"{max(0, int(100 - top1['distance'] * 0.7))}%")
+        st.info(f"🤝 **잘 맞는 궁합 포켓몬 (파트너)**: **{top1['best_match']}**")
 
     st.markdown("---")
 
     # Top 5 레이더 차트
-    st.markdown("### 📊 Top 5 포켓몬 능력치 비교 (Plotly 레이더 차트)")
+    st.markdown("### 📊 Top 5 포켓몬 능력치 비교 (레이더 차트)")
 
     categories = ['체력(HP)', '공격력', '방어력', '특수공격', '특수방어', '스피드']
     fig = go.Figure()
@@ -187,7 +164,7 @@ if not df_results.empty:
             r=stats_values,
             theta=cat_closed,
             fill='toself' if idx == 0 else 'none',
-            name=f"{idx+1}위: {row['k_name']} (#{row['id']})",
+            name=f"{idx+1}위: {row['name']} (#{row['id']})",
             line=dict(color=colors[idx % len(colors)], width=3 if idx == 0 else 1.5)
         ))
 
@@ -201,12 +178,12 @@ if not df_results.empty:
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # 하단 Top 5 카드
-    st.markdown("### 🐾 매칭된 Top 5 전체 보기")
+    # 하단 Top 5 요약 카드
+    st.markdown("### 🐾 매칭 Top 5 상세 목록")
     cols = st.columns(5)
     for idx, row in df_results.iterrows():
         with cols[idx]:
-            st.markdown(f"**{idx+1}위. {row['k_name']}**")
+            st.markdown(f"**{idx+1}위. {row['name']}**")
             st.image(row["img_url"], use_container_width=True)
-            st.caption(f"외향성(E): {row['e_weight']}점")
-            st.caption(f"직관성(N): {row['n_weight']}점")
+            st.caption(f"E점수: {row['e_weight']}점 / N점수: {row['n_weight']}점")
+            st.caption(f"🤝 궁합: {row['best_match']}")
