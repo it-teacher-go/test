@@ -2,217 +2,171 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
-# 1. 페이지 설정 및 따뜻한 디자인 적용
+# 1. 페이지 설정
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="따뜻한 대한민국 기온 탐색기",
-    page_icon="☀️",
+    page_title="나와 닮은 포켓몬 찾기",
+    page_icon="⚡",
     layout="wide"
 )
 
-# 따뜻하고 오가닉한 느낌의 CSS 스타일링
-st.markdown("""
-    <style>
-    /* 전체 메인 배경색 */
-    .main {
-        background-color: #faf6f0;
-    }
-    /* 카드 지표(Metric) 스타일링 */
-    div[data-testid="stMetric"] {
-        background-color: #ffffff;
-        border-radius: 12px;
-        padding: 16px 20px;
-        box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.04);
-        border: 1px solid #f0e6d2;
-    }
-    /* 안내 상자 커스텀 스타일 */
-    .guide-box {
-        background-color: #f7efe2;
-        border-left: 5px solid #e76f51;
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+st.title("⚡ 나의 성향 맞춤 포켓몬 Top 5 분석기")
+st.caption("가입 없이 사용 가능한 PokeAPI와 Plotly를 활용해 내 성향과 가장 잘 어울리는 포켓몬을 찾고 비교합니다.")
 
 # -----------------------------------------------------------------------------
-# 2. 이용방법 안내 섹션 (초보자용 가이드)
+# 2. 이용 안내 상자
 # -----------------------------------------------------------------------------
-st.title("☀️ 우리 동네 1년 기온 변화 탐색기")
-st.caption("가입 없이 이용 가능한 Open-Meteo 무료 API를 활용하여 대한민국 주요 도시의 기온 데이터를 시각화합니다.")
-
 st.markdown("""
-<div class="guide-box">
-    <b>💡 초보자를 위한 이용 안내</b><br>
-    1. <b>지역 선택</b>: 아래 드롭다운 메뉴에서 기온 흐름을 확인하고 싶은 도시를 선택해주세요.<br>
-    2. <b>오늘의 기온 지표</b>: 상단 카드에서 선택한 지역의 오늘 최고/최저 기온과 평균 기온을 한눈에 볼 수 있습니다.<br>
-    3. <b>월별 기온 추이 그래프</b>: 지난 1년간의 월별 평균 최고/최저 기온 변화를 꺾은선 그래프로 확인하세요. (그래프 위로 마우스를 올리면 상세 온도가 표시됩니다!)
+<div style="background-color: #f7efe2; border-left: 5px solid #e76f51; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+    <b>💡 이용 안내</b><br>
+    1. 왼쪽 사이드바에서 본인의 <b>MBTI 성향 비중(%)</b>을 슬라이더로 조절하세요.<br>
+    2. 성향에 따라 <b>PokeAPI</b>에서 데이터를 계산하여 가장 어울리는 <b>Top 5 포켓몬</b>을 실시간으로 분석합니다.<br>
+    3. 선택된 포켓몬의 <b>능력치 레이더 차트, 이미지, 어울리는 이유, 궁합</b>을 한눈에 확인하세요!
 </div>
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. 주요 도시 위도/경도 데이터 정의
+# 3. 대표 포켓몬 12마리 정의 (PokeAPI ID 및 성향 가중치 사전 정의)
 # -----------------------------------------------------------------------------
-CITIES = {
-    "서울특별시": {"lat": 37.5665, "lon": 126.9780},
-    "부산광역시": {"lat": 35.1796, "lon": 129.0756},
-    "대구광역시": {"lat": 35.8714, "lon": 128.6014},
-    "인천광역시": {"lat": 37.4563, "lon": 126.7052},
-    "광주광역시": {"lat": 35.1595, "lon": 126.8526},
-    "대전광역시": {"lat": 36.3510, "lon": 127.3850},
-    "울산광역시": {"lat": 35.5384, "lon": 129.3114},
-    "제주특별자치도": {"lat": 33.4996, "lon": 126.5312},
-    "강원도 (춘천)": {"lat": 37.8813, "lon": 127.7298}
-}
+POKEMON_DB = [
+    {"id": 25, "k_name": "피카츄", "mbti": "ENFP", "e_weight": 85, "n_weight": 80, "desc": "에너지 넘치고 호기심이 풍부하여 어디서든 인기가 많습니다. 새로운 아이디어를 떠올리는 데 탁월합니다.", "match": "INTJ (뮤츠)"},
+    {"id": 4, "k_name": "파이리", "mbti": "ESTP", "e_weight": 80, "n_weight": 40, "desc": "열정적이고 모험을 두려워하지 않는 행동파입니다. 일단 도전하고 보는 강한 추진력을 갖고 있습니다.", "match": "ISFJ (꼬북이)"},
+    {"id": 7, "k_name": "꼬북이", "mbti": "ISFP", "e_weight": 35, "n_weight": 30, "desc": "온화하고 마이페이스를 유지하며 주변 사람들을 묵묵히 챙깁니다. 여유로운 매력이 특징입니다.", "match": "ESTJ (괴력몬)"},
+    {"id": 1, "k_name": "이상해씨", "mbti": "INFJ", "e_weight": 30, "n_weight": 85, "desc": "조용하지만 깊은 생각과 강한 신념을 가지고 있습니다. 타인의 감정을 잘 이해하고 배려합니다.", "match": "ENTP (팬텀)"},
+    {"id": 143, "k_name": "잠만보", "mbti": "INFP", "e_weight": 20, "n_weight": 70, "desc": "평화롭고 상상력이 풍부하며 자신만의 풍부한 내면 세계를 가지고 있습니다. 느긋함 속에 강함이 숨어있습니다.", "match": "ENFJ (토게피)"},
+    {"id": 150, "k_name": "뮤츠", "mbti": "INTJ", "e_weight": 15, "n_weight": 95, "desc": "냉철한 분석력과 완벽주의적 성향을 지닌 전략가입니다. 목표를 정하면 철저하게 달성해냅니다.", "match": "ENFP (피카츄)"},
+    {"id": 39, "k_name": "푸린", "mbti": "ESFP", "e_weight": 90, "n_weight": 35, "desc": "사람들의 시선을 즐기며 사교성이 뛰어납니다. 감정 표현이 솔직하고 분위기를 밝게 만드는 에너지원입니다.", "match": "ISTJ (암나이트)"},
+    {"id": 68, "k_name": "괴력몬", "mbti": "ESTJ", "e_weight": 85, "n_weight": 20, "desc": "체계적이고 원칙을 중시하는 리더 타입입니다. 강한 책임감으로 목표를 향해 끝까지 밀어붙입니다.", "match": "ISFP (꼬북이)"},
+    {"id": 94, "k_name": "팬텀", "mbti": "ENTP", "e_weight": 88, "n_weight": 88, "desc": "재치 있고 독창적인 장난꾸러기입니다. 기존의 틀을 깨는 새로운 시도를 즐기는 창의적 인재입니다.", "match": "INFJ (이상해씨)"},
+    {"id": 133, "k_name": "이브이", "mbti": "ENFJ", "e_weight": 75, "n_weight": 75, "desc": "다양한 가능성을 지니고 있으며 타인을 잘 이끄는 매력적인 존재입니다. 적응력이 뛰어나고 친근합니다.", "match": "INTP (고라파덕)"},
+    {"id": 54, "k_name": "고라파덕", "mbti": "INTP", "e_weight": 25, "n_weight": 90, "desc": "호기심이 많고 깊은 생각에 잘 빠져듭니다. 독특한 관점으로 문제를 해결하는 잠재력을 가졌습니다.", "match": "ENFJ (이브이)"},
+    {"id": 175, "k_name": "토게피", "mbti": "ESFJ", "e_weight": 80, "n_weight": 50, "desc": "주변에 행복과 온기를 전하는 긍정 아이콘입니다. 협동심이 강하고 관계를 대단히 중요시합니다.", "match": "INFP (잠만보)"}
+]
 
 # -----------------------------------------------------------------------------
-# 4. 사용자 입력 (지역 선택)
+# 4. PokeAPI 연동 함수 (포켓몬 이미지 및 능력치를 실시간 수집)
 # -----------------------------------------------------------------------------
-selected_city = st.selectbox(
-    "📍 조회할 지역을 선택해주세요",
-    options=list(CITIES.keys()),
-    index=0
-)
-
-# -----------------------------------------------------------------------------
-# 5. Open-Meteo API 연동 및 데이터 불러오기 함수
-# -----------------------------------------------------------------------------
-@st.cache_data(ttl=3600)  # 1시간 동안 API 호출 결과 캐싱하여 빠른 실행 지원
-def load_weather_data(lat, lon):
-    """Open-Meteo Historical Weather API를 호출해 지난 1년간의 일별 최고/최저 기온을 받아오는 함수"""
-    today = datetime.today().date()
-    start_date = today - timedelta(days=365)
-    
-    # Open-Meteo Historical Weather API URL 구축
-    url = (
-        f"https://archive-api.open-meteo.com/v1/archive?"
-        f"latitude={lat}&longitude={lon}&"
-        f"start_date={start_date}&end_date={today}&"
-        f"daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean&"
-        f"timezone=Asia%2FTokyo"
-    )
-    
+@st.cache_data(ttl=3600)
+def fetch_pokemon_api_data(poke_id):
+    """PokeAPI를 호출하여 포켓몬의 스탯 및 공식 고화질 이미지 URL을 가져옵니다."""
+    url = f"https://pokeapi.co/api/v2/pokemon/{poke_id}"
     response = requests.get(url)
     if response.status_code == 200:
         data = response.json()
-        daily_data = data.get("daily", {})
-        df = pd.DataFrame({
-            "date": pd.to_datetime(daily_data.get("time", [])),
-            "temp_max": daily_data.get("temperature_2m_max", []),
-            "temp_min": daily_data.get("temperature_2m_min", []),
-            "temp_mean": daily_data.get("temperature_2m_mean", [])
-        })
-        return df
-    else:
-        return None
+        
+        # 공식 일러스트 이미지 추출
+        img_url = data["sprites"]["other"]["official-artwork"]["front_default"]
+        if not img_url:
+            img_url = data["sprites"]["front_default"]
+            
+        # 6대 능력치 파싱
+        stats = {stat["stat"]["name"]: stat["base_stat"] for stat in data["stats"]}
+        
+        return {
+            "img_url": img_url,
+            "hp": stats.get("hp", 50),
+            "attack": stats.get("attack", 50),
+            "defense": stats.get("defense", 50),
+            "sp_attack": stats.get("special-attack", 50),
+            "sp_defense": stats.get("special-defense", 50),
+            "speed": stats.get("speed", 50)
+        }
+    return None
 
 # -----------------------------------------------------------------------------
-# 6. 데이터 연동 및 화면 출력
+# 5. 사이드바 - 성향 입력 슬라이더
 # -----------------------------------------------------------------------------
-lat = CITIES[selected_city]["lat"]
-lon = CITIES[selected_city]["lon"]
+st.sidebar.header("🎯 내 성향 설정 (MBTI 비중)")
 
-with st.spinner(f"'{selected_city}'의 지난 1년 날씨 데이터를 가져오는 중입니다... 🌿"):
-    df_weather = load_weather_data(lat, lon)
+user_e = st.sidebar.slider("외향성 (E) 비중 (%)", 0, 100, 70, help="높을수록 외향적(E), 낮을수록 내향적(I)")
+user_n = st.sidebar.slider("직관성 (N) 비중 (%)", 0, 100, 80, help="높을수록 직관적(N), 낮을수록 감각적(S)")
 
-if df_weather is not None and not df_weather.empty:
-    # 가장 최근 날짜(오늘/어제) 데이터 추출
-    latest_row = df_weather.iloc[-1]
-    latest_date_str = latest_row["date"].strftime("%Y년 %m월 %d일")
+# 다시 고르기 (초기화) 버튼
+if st.sidebar.button("🔄 성향 다시 고르기"):
+    st.rerun()
+
+# -----------------------------------------------------------------------------
+# 6. 사용자 성향 기반 Top 5 포켓몬 실시간 계산 로직
+# -----------------------------------------------------------------------------
+calculated_list = []
+for p in POKEMON_DB:
+    # 유사도 거리를 계산합니다. (입력값과의 수치 차이가 적을수록 유사)
+    distance = ((p["e_weight"] - user_e) ** 2 + (p["n_weight"] - user_n) ** 2) ** 0.5
     
-    # --- [상단] 오늘(최근) 기온 지표 카드 ---
-    st.markdown(f"### 🌡️ 최근 기온 현황 <small style='font-size: 14px; color: #888;'>({latest_date_str} 기준)</small>", unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(
-            label="최고 기온",
-            value=f"{latest_row['temp_max']:.1f} °C"
-        )
-    with col2:
-        st.metric(
-            label="최저 기온",
-            value=f"{latest_row['temp_min']:.1f} °C"
-        )
-    with col3:
-        st.metric(
-            label="일평균 기온",
-            value=f"{latest_row['temp_mean']:.1f} °C"
-        )
+    # PokeAPI 데이터 호출
+    api_data = fetch_pokemon_api_data(p["id"])
+    if api_data:
+        combined_info = {**p, **api_data, "distance": distance}
+        calculated_list.append(combined_info)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+# 일치도가 높은(거리가 짧은) 순서로 정렬 후 Top 5 선출
+df_results = pd.DataFrame(calculated_list).sort_values("distance").head(5).reset_index(drop=True)
 
-    # --- [하단] 지난 1년 월별 기온 추이 Plotly 꺾은선 그래프 ---
-    st.markdown("### 📊 최근 1년 월별 기온 추이")
-    
-    # 월별 그룹화 (년-월 기준으로 평균 계산)
-    df_weather["year_month"] = df_weather["date"].dt.to_period("M").astype(str)
-    monthly_df = df_weather.groupby("year_month")[["temp_max", "temp_min", "temp_mean"]].mean().reset_index()
+# -----------------------------------------------------------------------------
+# 7. 화면 출력 - 1위 포켓몬 프로필 및 Top 5 레이더 차트
+# -----------------------------------------------------------------------------
+if not df_results.empty:
+    top1 = df_results.iloc[0]
 
-    # Plotly 그래프 생성
+    st.markdown(f"### 🏆 당신과 가장 어울리는 1위 포켓몬: **{top1['k_name']}** ({top1['mbti']})")
+
+    # 상단 1위 포켓몬 이미지, 어울리는 이유, 궁합 출력
+    col_img, col_info = st.columns([1, 2])
+    with col_img:
+        st.image(top1["img_url"], caption=f"ID: #{top1['id']} {top1['k_name']}", width=250)
+    with col_info:
+        st.subheader(f"✨ {top1['k_name']}와(과) 잘 어울리는 이유")
+        st.write(top1["desc"])
+        st.markdown(f"**❤️ 최고의 궁합(잘 맞는 유형):** `{top1['match']}`")
+        st.metric(label="성향 일치도", value=f"{max(0, int(100 - top1['distance'] * 0.7))}%")
+
+    st.markdown("---")
+
+    # Top 5 레이더 차트 시각화 (Plotly)
+    st.markdown("### 📊 Top 5 포켓몬 능력치 비교 (Plotly 레이더 차트)")
+
+    categories = ['체력(HP)', '공격력', '방어력', '특수공격', '특수방어', '스피드']
     fig = go.Figure()
 
-    # 월별 평균 최고 기온 선 (따뜻한 주황색)
-    fig.add_trace(go.Scatter(
-        x=monthly_df["year_month"],
-        y=monthly_df["temp_max"],
-        mode="lines+markers",
-        name="월평균 최고기온",
-        line=dict(color="#E76F51", width=3),
-        marker=dict(size=8),
-        hovertemplate="<b>%{x}</b><br>평균 최고기온: %{y:.1f} °C<extra></extra>"
-    ))
+    colors = ["#E76F51", "#2A9D8F", "#457B9D", "#F4A261", "#E9C46A"]
 
-    # 월별 평균 기온 선 (녹색/티일)
-    fig.add_trace(go.Scatter(
-        x=monthly_df["year_month"],
-        y=monthly_df["temp_mean"],
-        mode="lines+markers",
-        name="월평균 기온",
-        line=dict(color="#2A9D8F", width=2.5, dash="dash"),
-        marker=dict(size=6),
-        hovertemplate="<b>%{x}</b><br>월평균 기온: %{y:.1f} °C<extra></extra>"
-    ))
+    for idx, row in df_results.iterrows():
+        stats_values = [
+            row["hp"], row["attack"], row["defense"],
+            row["sp_attack"], row["sp_defense"], row["speed"]
+        ]
+        # 방사형 연결을 위해 첫 번째 값을 끝에 추가
+        stats_values.append(stats_values[0])
+        cat_closed = categories + [categories[0]]
 
-    # 월별 평균 최저 기온 선 (시원한 푸른색)
-    fig.add_trace(go.Scatter(
-        x=monthly_df["year_month"],
-        y=monthly_df["temp_min"],
-        mode="lines+markers",
-        name="월평균 최저기온",
-        line=dict(color="#457B9D", width=3),
-        marker=dict(size=8),
-        hovertemplate="<b>%{x}</b><br>평균 최저기온: %{y:.1f} °C<extra></extra>"
-    ))
+        fig.add_trace(go.Scatterpolar(
+            r=stats_values,
+            theta=cat_closed,
+            fill='toself' if idx == 0 else 'none',  # 1위만 색 채우기
+            name=f"{idx+1}위: {row['k_name']} ({row['mbti']})",
+            line=dict(color=colors[idx % len(colors)], width=3 if idx == 0 else 1.5)
+        ))
 
-    # 레이아웃 스타일 설정
     fig.update_layout(
-        title=dict(
-            text=f"<b>[{selected_city}] 지난 1년간 월별 기온 변화</b>",
-            font=dict(size=18, color="#264653")
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 140])
         ),
-        xaxis=dict(
-            title="연월 (Year-Month)",
-            showgrid=True,
-            gridcolor="#f0e6d2"
-        ),
-        yaxis=dict(
-            title="기온 (°C)",
-            showgrid=True,
-            gridcolor="#f0e6d2"
-        ),
-        plot_bgcolor="#ffffff",
+        showlegend=True,
         paper_bgcolor="#ffffff",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=40, r=40, t=60, b=40)
+        plot_bgcolor="#ffffff",
+        margin=dict(l=40, r=40, t=30, b=30)
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
-else:
-    st.error("⚠️ 날씨 데이터를 가져오는 중에 문제가 발생했습니다. 잠시 후 다시 시도해주세요!")
+    # 하단 Top 5 전체 요약 카드 리스트
+    st.markdown("### 🐾 매칭된 Top 5 포켓몬 전체 보기")
+    cols = st.columns(5)
+    for idx, row in df_results.iterrows():
+        with cols[idx]:
+            st.markdown(f"**{idx+1}위. {row['k_name']}**")
+            st.image(row["img_url"], use_container_width=True)
+            st.caption(f"MBTI: {row['mbti']}")
+            st.caption(f"궁합: {row['match']}")
